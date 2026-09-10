@@ -5,9 +5,11 @@ import pandas as pd
 import numpy as np
 from sklearn.datasets import load_iris
 import shap
+import subprocess
+import sys
 
 # Initialize FastAPI
-app = FastAPI(title="Iris Classifier API with SHAP")
+app = FastAPI(title="Iris Classifier API with Self-Healing")
 
 # ============================================
 # CORS MIDDLEWARE
@@ -79,8 +81,8 @@ def calculate_drift():
 @app.get("/")
 def root():
     return {
-        "message": "Iris Classifier API is running with SHAP!",
-        "endpoints": ["/predict", "/drift-report", "/explain", "/add-data"]
+        "message": "Iris Classifier API is running with Self-Healing!",
+        "endpoints": ["/predict", "/drift-report", "/explain", "/add-data", "/auto-retrain"]
     }
 
 @app.get("/predict")
@@ -113,24 +115,15 @@ def drift_report():
 @app.get("/explain")
 def explain(sepal_length: float, sepal_width: float, petal_length: float, petal_width: float):
     try:
-        # Convert input to array
         features = np.array([[sepal_length, sepal_width, petal_length, petal_width]])
-        
-        # Calculate SHAP values
         shap_values = explainer.shap_values(features)
         
-        # Handle different shap output formats
         if isinstance(shap_values, list):
-            # For classification, take first class
             shap_values = shap_values[0]
         
-        # Get feature names
         feature_names = ['sepal_length', 'sepal_width', 'petal_length', 'petal_width']
-        
-        # Get prediction
         pred = model.predict(features)[0]
         
-        # Convert shap values to list
         if isinstance(shap_values, np.ndarray):
             shap_list = shap_values.flatten().tolist()
         else:
@@ -184,3 +177,47 @@ def add_data(sepal_length: float, sepal_width: float, petal_length: float, petal
         "drift_status": "⚠️ Drift detected!" if detected else "✅ No drift yet",
         "current_psi": psi
     }
+
+@app.post("/auto-retrain")
+def auto_retrain():
+    """Check drift and trigger retraining if needed"""
+    psi, detected = calculate_drift()
+    
+    if not detected:
+        return {
+            "message": "No drift detected. Retraining not needed.",
+            "psi": psi,
+            "threshold": 0.2,
+            "drift_detected": False,
+            "action": "none"
+        }
+    
+    # Drift detected - trigger retrain
+    print("🚨 Drift detected! Triggering retrain...")
+    
+    try:
+        # Use the SAME Python interpreter that's running FastAPI
+        result = subprocess.run(
+            [sys.executable, "retrain.py"],
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+        
+        return {
+            "message": "Drift detected. Retraining triggered.",
+            "psi": psi,
+            "threshold": 0.2,
+            "drift_detected": True,
+            "action": "retrain_triggered",
+            "retrain_output": result.stdout[-800:] if result.stdout else "No output",
+            "retrain_error": result.stderr[-400:] if result.stderr else None
+        }
+    except Exception as e:
+        return {
+            "message": "Drift detected but retrain failed.",
+            "psi": psi,
+            "drift_detected": True,
+            "action": "retrain_failed",
+            "error": str(e)
+        }
