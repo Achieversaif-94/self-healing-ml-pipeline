@@ -7,6 +7,7 @@ from sklearn.datasets import load_iris
 import shap
 import subprocess
 import sys
+from datetime import datetime
 
 # Initialize FastAPI
 app = FastAPI(title="Iris Classifier API with Self-Healing")
@@ -53,6 +54,11 @@ training_data = pd.DataFrame(X_train, columns=['sepal_length', 'sepal_width', 'p
 # CURRENT DATA (Starts as copy of training data)
 # ============================================
 current_data = training_data.copy()
+
+# ============================================
+# DRIFT HISTORY (for charting)
+# ============================================
+drift_history = []
 
 # ============================================
 # DRIFT DETECTION
@@ -104,12 +110,23 @@ def predict(sepal_length: float, sepal_width: float, petal_length: float, petal_
 @app.get("/drift-report")
 def drift_report():
     psi, detected = calculate_drift()
+    
+    # Store in history
+    drift_history.append({
+        "timestamp": datetime.now().strftime("%H:%M:%S"),
+        "psi": round(psi, 4)
+    })
+    # Keep only last 20 entries
+    if len(drift_history) > 20:
+        drift_history.pop(0)
+    
     return {
         "psi": psi,
         "threshold": 0.2,
         "drift_detected": detected,
         "status": "⚠️ Drift detected!" if detected else "✅ No drift",
-        "total_samples": len(current_data)
+        "total_samples": len(current_data),
+        "history": drift_history
     }
 
 @app.get("/explain")

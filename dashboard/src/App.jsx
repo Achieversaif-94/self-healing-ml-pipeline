@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from 'recharts'
 import './App.css'
 
 const API_URL = 'http://127.0.0.1:8000'
@@ -8,17 +9,17 @@ function App() {
   const [prediction, setPrediction] = useState(null)
   const [drift, setDrift] = useState(null)
   const [shap, setShap] = useState(null)
+  const [driftHistory, setDriftHistory] = useState([])
   const [loading, setLoading] = useState(false)
   const [apiStatus, setApiStatus] = useState('checking')
   const [retrainResult, setRetrainResult] = useState(null)
   const [theme, setTheme] = useState(() => {
-    // Check localStorage or system preference
     const saved = localStorage.getItem('theme')
     if (saved) return saved
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
   })
 
-  // Apply theme to document
+  // Apply theme
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('theme', theme)
@@ -64,6 +65,9 @@ function App() {
     try {
       const res = await axios.get(`${API_URL}/drift-report`)
       setDrift(res.data)
+      if (res.data.history) {
+        setDriftHistory(res.data.history)
+      }
     } catch (err) {
       console.error(err)
     }
@@ -222,6 +226,46 @@ function App() {
             <button className="btn btn-alert" onClick={triggerRetrain}>
               Trigger Auto-Retrain
             </button>
+          )}
+
+          {driftHistory.length > 2 && (
+            <div className="chart-wrap">
+              <ResponsiveContainer width="100%" height={140}>
+                <LineChart data={driftHistory} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                  <XAxis 
+                    dataKey="timestamp" 
+                    tick={{ fontSize: 10, fill: 'var(--text-faint)' }}
+                    axisLine={{ stroke: 'var(--border)' }}
+                    tickLine={false}
+                  />
+                  <YAxis 
+                    tick={{ fontSize: 10, fill: 'var(--text-faint)' }}
+                    axisLine={false}
+                    tickLine={false}
+                    domain={[0, 'auto']}
+                  />
+                  <Tooltip 
+                    contentStyle={{
+                      background: 'var(--bg-elevated)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      color: 'var(--text)'
+                    }}
+                  />
+                  <ReferenceLine y={0.2} stroke="var(--alert)" strokeDasharray="4 4" />
+                  <Line 
+                    type="monotone" 
+                    dataKey="psi" 
+                    stroke="var(--accent)" 
+                    strokeWidth={2} 
+                    dot={{ r: 2, fill: 'var(--accent)' }}
+                    animationDuration={400}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+              <p className="chart-caption">PSI over time (threshold: 0.2)</p>
+            </div>
           )}
         </section>
 

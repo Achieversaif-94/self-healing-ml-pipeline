@@ -470,6 +470,26 @@ html, body {
 }
 
 /* ============================================
+   DRIFT CHART
+   ============================================ */
+.chart-wrap {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: background-color 0.3s ease;
+}
+
+.chart-caption {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: center;
+  margin-top: 6px;
+  letter-spacing: 0.02em;
+}
+
+/* ============================================
    FOOTER
    ============================================ */
 .footer {
