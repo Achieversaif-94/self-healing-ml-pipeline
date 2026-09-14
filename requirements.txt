@@ -1,0 +1,9 @@
+mlflow
+scikit-learn
+pandas
+numpy
+fastapi
+uvicorn
+evidently
+shap
+xgboost
