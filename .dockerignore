@@ -1,14 +1,11 @@
 venv/
-mlruns/
 __pycache__/
 *.pyc
 .git/
 .gitignore
-dashboard/
 node_modules/
 *.log
-*.csv
-*.txt
-screenshots/
 .pytest_cache/
 tests/
+*.csv
+!requirements.txt

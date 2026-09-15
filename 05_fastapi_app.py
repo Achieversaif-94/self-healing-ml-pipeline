@@ -1,12 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import mlflow
 import pandas as pd
 import numpy as np
 from sklearn.datasets import load_iris
 import shap
 import subprocess
 import sys
+import pickle
 from datetime import datetime
 
 # Initialize FastAPI
@@ -24,15 +24,11 @@ app.add_middleware(
 )
 
 # ============================================
-# YOUR RANDOMFOREST RUN ID
-# ============================================
-RUN_ID = "b78e8495603d45c9aa17a5e274455f09"
-
-# ============================================
-# LOAD MODEL
+# LOAD MODEL FROM PKL (no MLflow needed)
 # ============================================
 print("Loading model...")
-model = mlflow.sklearn.load_model(f"runs:/{RUN_ID}/RandomForest_model")
+with open("model.pkl", "rb") as f:
+    model = pickle.load(f)
 print("Model loaded!")
 
 # ============================================
@@ -111,12 +107,10 @@ def predict(sepal_length: float, sepal_width: float, petal_length: float, petal_
 def drift_report():
     psi, detected = calculate_drift()
     
-    # Store in history
     drift_history.append({
         "timestamp": datetime.now().strftime("%H:%M:%S"),
         "psi": round(psi, 4)
     })
-    # Keep only last 20 entries
     if len(drift_history) > 20:
         drift_history.pop(0)
     
@@ -197,7 +191,6 @@ def add_data(sepal_length: float, sepal_width: float, petal_length: float, petal
 
 @app.post("/auto-retrain")
 def auto_retrain():
-    """Check drift and trigger retraining if needed"""
     psi, detected = calculate_drift()
     
     if not detected:
@@ -209,11 +202,9 @@ def auto_retrain():
             "action": "none"
         }
     
-    # Drift detected - trigger retrain
     print("🚨 Drift detected! Triggering retrain...")
     
     try:
-        # Use the SAME Python interpreter that's running FastAPI
         result = subprocess.run(
             [sys.executable, "retrain.py"],
             capture_output=True,
