@@ -80,6 +80,7 @@ def test_drift_report_structure():
     assert "threshold" in data
     assert "drift_detected" in data
     assert "status" in data
+    assert "history" in data
     assert data["threshold"] == 0.2
 
 

@@ -7,6 +7,7 @@ import shap
 import subprocess
 import sys
 import pickle
+import os
 from datetime import datetime
 
 # Initialize FastAPI
@@ -15,9 +16,11 @@ app = FastAPI(title="Iris Classifier API with Self-Healing")
 # ============================================
 # CORS MIDDLEWARE
 # ============================================
+allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -57,21 +60,68 @@ current_data = training_data.copy()
 drift_history = []
 
 # ============================================
-# DRIFT DETECTION
+# REAL PSI CALCULATION
 # ============================================
+def calculate_psi(expected, actual, bins=10, epsilon=1e-6):
+    """
+    Calculate Population Stability Index (PSI) between two distributions.
+    
+    PSI = Σ (Actual% - Expected%) × ln(Actual% / Expected%)
+    
+    Thresholds:
+        PSI < 0.1  → no significant change
+        0.1 ≤ PSI < 0.2 → moderate change (monitor)
+        PSI ≥ 0.2  → significant change (retrain)
+    """
+    expected = np.asarray(expected).flatten()
+    actual = np.asarray(actual).flatten()
+    
+    # Build bin edges spanning both distributions
+    breakpoints = np.linspace(
+        min(expected.min(), actual.min()),
+        max(expected.max(), actual.max()),
+        bins + 1
+    )
+    
+    # Get counts in each bin
+    expected_counts, _ = np.histogram(expected, bins=breakpoints)
+    actual_counts, _ = np.histogram(actual, bins=breakpoints)
+    
+    # Convert to percentages
+    expected_pct = expected_counts / len(expected)
+    actual_pct = actual_counts / len(actual)
+    
+    # Avoid log(0) and division by zero
+    expected_pct = np.where(expected_pct == 0, epsilon, expected_pct)
+    actual_pct = np.where(actual_pct == 0, epsilon, actual_pct)
+    
+    # PSI formula per bin
+    psi_values = (actual_pct - expected_pct) * np.log(actual_pct / expected_pct)
+    psi_total = float(np.sum(psi_values))
+    
+    return psi_total
+
+
 def calculate_drift():
+    """Calculate drift across all 4 features using real PSI."""
     try:
-        train_numeric = training_data[['sepal_length', 'sepal_width', 'petal_length', 'petal_width']]
-        current_numeric = current_data[['sepal_length', 'sepal_width', 'petal_length', 'petal_width']]
+        feature_cols = ['sepal_length', 'sepal_width', 'petal_length', 'petal_width']
         
-        train_mean = train_numeric.mean()
-        current_mean = current_numeric.mean()
+        psi_scores = []
+        for col in feature_cols:
+            psi = calculate_psi(
+                training_data[col].values,
+                current_data[col].values
+            )
+            psi_scores.append(psi)
         
-        denominator = train_mean.abs() + 0.001
-        diff = abs((current_mean - train_mean) / denominator).mean()
+        # Average PSI across features
+        psi_avg = float(np.mean(psi_scores))
         
-        psi = min(1.0, float(diff * 2))
-        return psi, psi > 0.2
+        # Detect drift if ANY feature exceeds 0.2
+        drift_detected = any(p > 0.2 for p in psi_scores)
+        
+        return psi_avg, drift_detected
     except Exception as e:
         print(f"Drift calculation error: {e}")
         return 0.0, False
