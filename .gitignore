@@ -1,9 +1,33 @@
-venv/
-mlruns/
+# Python
 __pycache__/
 *.pyc
-.DS_Store
-*.log
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ML artifacts
 *.db
-*.sqlite
+mlruns/
+mlflow.db
+
+# Environment
 .env
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
