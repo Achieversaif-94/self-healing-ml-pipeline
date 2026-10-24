@@ -135,7 +135,7 @@ When a harder drift was simulated, the champion model struggled on the new holdo
 
 ## Tech Stack
 
-Python · FastAPI · scikit-learn · MLflow · SHAP · React · Docker · Render · Vercel
+Python · FastAPI · scikit-learn · SHAP · React · Docker · Render · Vercel
 
 ---
 
@@ -191,7 +191,7 @@ Expected: **17 passed, 1 skipped** (API, PSI logic, and retrain gate).
 
 ### Why only promote if F1 improves?
 - Prevents degrading the production model
-- Benchmark proved it: a lower-scoring challenger (e.g., 0.9108) is rejected in favor of the champion, keeping production safe.
+- Scenario 1 in the results shows that a tied challenger is rejected to keep the production model safe.
 
 ### What I'd change at scale
 - **Real dataset** — Iris is a proof-of-concept. Production would use Telco Churn or fraud data.
