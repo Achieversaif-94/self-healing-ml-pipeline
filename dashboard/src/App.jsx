@@ -46,13 +46,9 @@ function App() {
   const makePrediction = async () => {
     setLoading(true)
     try {
-      const res = await axios.get(`${API_URL}/predict`, {
-        params: {
-          sepal_length: 5.1,
-          sepal_width: 3.5,
-          petal_length: 1.4,
-          petal_width: 0.2
-        }
+      // Changed to POST with JSON body
+      const res = await axios.post(`${API_URL}/predict`, {
+        sepal_length: 5.1, sepal_width: 3.5, petal_length: 1.4, petal_width: 0.2
       })
       setPrediction(res.data)
     } catch (err) {
@@ -92,13 +88,12 @@ function App() {
   const addExtremeData = async () => {
     try {
       for (let i = 0; i < 5; i++) {
-        await axios.post(`${API_URL}/add-data`, null, {
-          params: {
-            sepal_length: 8 + Math.random() * 2,
-            sepal_width: 5 + Math.random() * 1,
-            petal_length: 7 + Math.random() * 1,
-            petal_width: 4 + Math.random() * 1
-          }
+        // Changed to POST with JSON body
+        await axios.post(`${API_URL}/add-data`, {
+          sepal_length: 8 + Math.random() * 2,
+          sepal_width: 5 + Math.random() * 1,
+          petal_length: 7 + Math.random() * 1,
+          petal_width: 4 + Math.random() * 1
         })
       }
       await checkDrift()

@@ -1,14 +1,6 @@
 """
 Champion/Challenger model retraining with proper evaluation.
-
-Key fixes:
-- Same holdout set for both models (fair F1 comparison)
-- Actually updates model.pkl when challenger wins (real self-healing)
-- Fails loudly on errors (no silent failures)
-- Relative paths (works in Docker)
-- Requires margin to prevent noise-driven promotions
 """
-
 import json
 import sys
 from pathlib import Path
@@ -34,12 +26,6 @@ MARGIN = 0.01  # challenger must beat champion by at least 1 point
 def run_retrain():
     """
     Retrain a challenger model and compare against champion on same holdout.
-    
-    Returns dict with:
-        champion_f1: F1 of current production model on holdout
-        challenger_f1: F1 of newly trained model on holdout
-        holdout_size: number of samples in holdout
-        promoted: True if challenger was promoted to production
     """
     # ============================================
     # VALIDATE INPUTS
@@ -63,13 +49,23 @@ def run_retrain():
 
     if new_data.empty:
         raise ValueError(f"New data at {DATA_PATH} is empty")
+    
+    # Drop rows where target is missing (NaN) — these are unlabeled simulation data
+    if 'target' in new_data.columns:
+        labeled_data = new_data.dropna(subset=['target']).copy()
+        labeled_data['target'] = labeled_data['target'].astype(int)
+    else:
+        labeled_data = new_data.copy()
+        labeled_data['target'] = 0  # fallback if no target column
 
-    X_new = new_data[FEATURES].values
-    y_new = new_data["target"].values
+    if labeled_data.empty:
+        raise ValueError("No labeled data found in current_data.csv. Cannot retrain.")
+
+    X_new = labeled_data[FEATURES].values
+    y_new = labeled_data["target"].values
 
     # ============================================
     # SPLIT NEW DATA INTO TRAIN/TEST FOR CHALLENGER
-    # This is the SAME holdout used to evaluate BOTH models
     # ============================================
     X_new_train, X_new_test, y_new_train, y_new_test = train_test_split(
         X_new, y_new, test_size=0.4, random_state=42, stratify=y_new
@@ -99,12 +95,11 @@ def run_retrain():
     promoted = challenger_f1 >= champion_f1 + MARGIN
 
     if promoted:
-        # Atomic swap: save to temp, then replace
         temp_path = MODEL_PATH.with_suffix(".tmp")
         joblib.dump(challenger, temp_path)
         temp_path.replace(MODEL_PATH)
 
-        return {
+    return {
         "champion_f1": round(champion_f1, 4),
         "challenger_f1": round(challenger_f1, 4),
         "f1_delta": round(challenger_f1 - champion_f1, 4),
@@ -112,6 +107,7 @@ def run_retrain():
         "promoted": promoted,
         "decision": "PROMOTED — challenger beat champion" if promoted else "KEPT — champion remained in production",
     }
+
 
 if __name__ == "__main__":
     try:
