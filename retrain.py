@@ -104,13 +104,14 @@ def run_retrain():
         joblib.dump(challenger, temp_path)
         temp_path.replace(MODEL_PATH)
 
-    return {
+        return {
         "champion_f1": round(champion_f1, 4),
         "challenger_f1": round(challenger_f1, 4),
+        "f1_delta": round(challenger_f1 - champion_f1, 4),
         "holdout_size": len(y_new_test),
         "promoted": promoted,
+        "decision": "PROMOTED — challenger beat champion" if promoted else "KEPT — champion remained in production",
     }
-
 
 if __name__ == "__main__":
     try:

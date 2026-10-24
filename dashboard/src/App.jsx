@@ -222,12 +222,41 @@ function App() {
             </button>
           </div>
 
-          {drift?.drift_detected && (
-            <button className="btn btn-alert" onClick={triggerRetrain}>
-              Trigger Auto-Retrain
-            </button>
-          )}
+        {drift?.drift_detected && (
+    <button className="btn btn-alert" onClick={triggerRetrain}>
+        Trigger Auto-Retrain
+    </button>
+)}
 
+{retrainResult && (
+    <div className="retrain-result">
+        <div className="retrain-header">
+            <span className="retrain-tag">RETRAIN RESULT</span>
+            <span className={`retrain-decision ${retrainResult.promoted ? 'promoted' : 'kept'}`}>
+                {retrainResult.promoted ? 'PROMOTED' : 'KEPT'}
+            </span>
+        </div>
+        <div className="retrain-metrics">
+            <div className="retrain-metric">
+                <span className="metric-label">Champion F1</span>
+                <span className="metric-value mono">{retrainResult.champion_f1}</span>
+            </div>
+            <div className="retrain-metric">
+                <span className="metric-label">Challenger F1</span>
+                <span className="metric-value mono">{retrainResult.challenger_f1}</span>
+            </div>
+            <div className="retrain-metric">
+                <span className="metric-label">Delta</span>
+                <span className={`metric-value mono ${retrainResult.f1_delta >= 0 ? 'positive' : 'negative'}`}>
+                    {retrainResult.f1_delta >= 0 ? '+' : ''}{retrainResult.f1_delta}
+                </span>
+            </div>
+        </div>
+        <p className="retrain-detail">
+            {retrainResult.decision} (holdout: {retrainResult.holdout_size} samples)
+        </p>
+    </div>
+)}
           {driftHistory.length > 2 && (
             <div className="chart-wrap">
               <ResponsiveContainer width="100%" height={140}>

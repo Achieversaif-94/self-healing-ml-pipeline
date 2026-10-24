@@ -577,3 +577,83 @@ html, body {
   .shap-row { grid-template-columns: 90px 1fr 50px; font-size: 12px; }
   .btn-row { grid-template-columns: 1fr; }
 }
+/* ============================================
+   RETRAIN RESULT CARD
+   ============================================ */
+.retrain-result {
+  margin-top: 12px;
+  padding: 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  animation: fadeIn 0.3s ease;
+}
+
+.retrain-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.retrain-tag {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  text-transform: uppercase;
+}
+
+.retrain-decision {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.04em;
+}
+
+.retrain-decision.promoted {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.retrain-decision.kept {
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+
+.retrain-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.retrain-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.metric-label {
+  font-size: 10px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.metric-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.metric-value.positive { color: var(--ok); }
+.metric-value.negative { color: var(--alert); }
+
+.retrain-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
