@@ -15,7 +15,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from importlib import import_module
-fastapi_module = import_module("05_fastapi_app")
+fastapi_module = import_module("app")
 calculate_psi = fastapi_module.calculate_psi
 
 

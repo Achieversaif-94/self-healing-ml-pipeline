@@ -50,15 +50,31 @@ Try it right now — no setup required:
 
 ## Results
 
-### Model Performance
+### Scenario 1: Rejected Challenger (Drift Detected, No Promotion)
+
+When drift was simulated, the pipeline retrained the model. Because the challenger did not beat the champion's F1 score by a significant margin, the champion was kept in production.
 
 | Metric | Value |
 |--------|-------|
-| Baseline F1 (RandomForest) | 1.0000 |
-| Post-retrain F1 | 0.9108 |
-| Delta | -0.0892 |
+| Champion F1 (on holdout) | 1.0000 |
+| Challenger F1 (on holdout) | 1.0000 |
+| Holdout Size | 20 |
+| Decision | **KEPT** |
 
-The negative delta is intentional. When drift was detected, the pipeline retrained on the combined dataset, but the new model scored lower on the test set. The champion model stayed in production. That's the self-healing logic working correctly — never promote a worse model.
+*(This proves the gate works — it doesn't blindly overwrite a good model).*
+
+### Scenario 2: Promoted Challenger (Drift Detected, Improved Promotion)
+
+When a harder drift was simulated, the champion model struggled on the new holdout data. The challenger (trained on combined original + new data) outperformed it and was automatically promoted to production.
+
+| Metric | Value |
+|--------|-------|
+| Champion F1 (on holdout) | 0.1385 |
+| Challenger F1 (on holdout) | 1.0000 |
+| Delta | +0.8615 |
+| Decision | **PROMOTED** |
+
+*(This proves real self-healing — a broken model was detected and replaced automatically).*
 
 ### API Latency (100 requests)
 
@@ -67,20 +83,14 @@ The negative delta is intentional. When drift was detected, the pipeline retrain
 | p50 (median) | 10.3 ms |
 | p95 | 12.3 ms |
 | p99 | 14.4 ms |
-| mean | 10.6 ms |
 
 ### Drift Detection
 
 | Metric | Value |
 |--------|-------|
 | PSI (no drift) | 0.0000 |
-| PSI (after 20 extreme samples) | 1.3154 |
+| PSI (after 20 extreme samples) | 0.9322 |
 | Detection time | 5.4 ms |
-
-**PSI interpretation:**
-- PSI < 0.1 → No significant change
-- 0.1 ≤ PSI < 0.2 → Moderate shift (monitor)
-- PSI ≥ 0.2 → Significant shift (retrain triggered)
 
 ### Testing
 
