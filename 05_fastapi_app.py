@@ -1,14 +1,20 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
 from sklearn.datasets import load_iris
 import shap
-import subprocess
-import sys
 import pickle
+import joblib
 import os
+import time
 from datetime import datetime
+from pathlib import Path
+
+# ============================================
+# IMPORT RETRAIN FUNCTION
+# ============================================
+from retrain import run_retrain, MODEL_PATH
 
 # Initialize FastAPI
 app = FastAPI(title="Iris Classifier API with Self-Healing")
@@ -27,11 +33,14 @@ app.add_middleware(
 )
 
 # ============================================
-# LOAD MODEL FROM PKL (no MLflow needed)
+# LOAD MODEL (supports both pickle and joblib)
 # ============================================
 print("Loading model...")
-with open("model.pkl", "rb") as f:
-    model = pickle.load(f)
+try:
+    model = joblib.load(MODEL_PATH)
+except Exception:
+    with open(MODEL_PATH, "rb") as f:
+        model = pickle.load(f)
 print("Model loaded!")
 
 # ============================================
@@ -60,6 +69,11 @@ current_data = training_data.copy()
 drift_history = []
 
 # ============================================
+# COOLDOWN TRACKER
+# ============================================
+last_retrain_time = 0
+
+# ============================================
 # REAL PSI CALCULATION
 # ============================================
 def calculate_psi(expected, actual, bins=10, epsilon=1e-6):
@@ -67,39 +81,27 @@ def calculate_psi(expected, actual, bins=10, epsilon=1e-6):
     Calculate Population Stability Index (PSI) between two distributions.
     
     PSI = Σ (Actual% - Expected%) × ln(Actual% / Expected%)
-    
-    Thresholds:
-        PSI < 0.1  → no significant change
-        0.1 ≤ PSI < 0.2 → moderate change (monitor)
-        PSI ≥ 0.2  → significant change (retrain)
     """
     expected = np.asarray(expected).flatten()
     actual = np.asarray(actual).flatten()
     
-    # Build bin edges spanning both distributions
     breakpoints = np.linspace(
         min(expected.min(), actual.min()),
         max(expected.max(), actual.max()),
         bins + 1
     )
     
-    # Get counts in each bin
     expected_counts, _ = np.histogram(expected, bins=breakpoints)
     actual_counts, _ = np.histogram(actual, bins=breakpoints)
     
-    # Convert to percentages
     expected_pct = expected_counts / len(expected)
     actual_pct = actual_counts / len(actual)
     
-    # Avoid log(0) and division by zero
     expected_pct = np.where(expected_pct == 0, epsilon, expected_pct)
     actual_pct = np.where(actual_pct == 0, epsilon, actual_pct)
     
-    # PSI formula per bin
     psi_values = (actual_pct - expected_pct) * np.log(actual_pct / expected_pct)
-    psi_total = float(np.sum(psi_values))
-    
-    return psi_total
+    return float(np.sum(psi_values))
 
 
 def calculate_drift():
@@ -115,16 +117,14 @@ def calculate_drift():
             )
             psi_scores.append(psi)
         
-        # Average PSI across features
         psi_avg = float(np.mean(psi_scores))
-        
-        # Detect drift if ANY feature exceeds 0.2
         drift_detected = any(p > 0.2 for p in psi_scores)
         
         return psi_avg, drift_detected
     except Exception as e:
         print(f"Drift calculation error: {e}")
         return 0.0, False
+
 
 # ============================================
 # API ENDPOINTS
@@ -136,6 +136,7 @@ def root():
         "message": "Iris Classifier API is running with Self-Healing!",
         "endpoints": ["/predict", "/drift-report", "/explain", "/add-data", "/auto-retrain"]
     }
+
 
 @app.get("/predict")
 def predict(sepal_length: float, sepal_width: float, petal_length: float, petal_width: float):
@@ -152,6 +153,7 @@ def predict(sepal_length: float, sepal_width: float, petal_length: float, petal_
             "petal_width": petal_width
         }
     }
+
 
 @app.get("/drift-report")
 def drift_report():
@@ -172,6 +174,7 @@ def drift_report():
         "total_samples": len(current_data),
         "history": drift_history
     }
+
 
 @app.get("/explain")
 def explain(sepal_length: float, sepal_width: float, petal_length: float, petal_width: float):
@@ -198,26 +201,15 @@ def explain(sepal_length: float, sepal_width: float, petal_length: float, petal_
             },
             "feature_importance": {
                 feature_names[i]: round(abs(shap_list[i]), 4) for i in range(4)
-            },
-            "explanation": "Higher positive values push prediction toward this flower"
-        }
-    except Exception as e:
-        return {
-            "error": str(e),
-            "message": "SHAP calculation error. Using fallback.",
-            "features": {
-                "sepal_length": sepal_length,
-                "sepal_width": sepal_width,
-                "petal_length": petal_length,
-                "petal_width": petal_width
             }
         }
+    except Exception as e:
+        return {"error": str(e), "message": "SHAP calculation error"}
+
 
 @app.post("/add-data")
 def add_data(sepal_length: float, sepal_width: float, petal_length: float, petal_width: float):
     global current_data
-    
-    print(f"📥 Adding data: sl={sepal_length}, sw={sepal_width}, pl={petal_length}, pw={petal_width}")
     
     new_row = pd.DataFrame({
         'sepal_length': [sepal_length],
@@ -228,8 +220,6 @@ def add_data(sepal_length: float, sepal_width: float, petal_length: float, petal
     
     current_data = pd.concat([current_data, new_row], ignore_index=True)
     
-    print(f"📊 Total records: {len(current_data)}")
-    
     psi, detected = calculate_drift()
     
     return {
@@ -239,43 +229,53 @@ def add_data(sepal_length: float, sepal_width: float, petal_length: float, petal
         "current_psi": psi
     }
 
+
 @app.post("/auto-retrain")
 def auto_retrain():
+    """
+    Trigger retraining if drift is detected.
+    Uses run_retrain() function directly (no subprocess).
+    Reloads model after promotion.
+    """
+    global model, explainer, last_retrain_time, current_data
+    
     psi, detected = calculate_drift()
     
     if not detected:
         return {
-            "message": "No drift detected. Retraining not needed.",
+            "action": "none",
             "psi": psi,
-            "threshold": 0.2,
             "drift_detected": False,
-            "action": "none"
+            "message": "No drift detected. Retraining not needed."
         }
     
-    print("🚨 Drift detected! Triggering retrain...")
-    
-    try:
-        result = subprocess.run(
-            [sys.executable, "retrain.py"],
-            capture_output=True,
-            text=True,
-            timeout=300
+    # Cooldown: 60 seconds between retrains
+    if time.time() - last_retrain_time < 60:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Cooldown active. Wait {int(60 - (time.time() - last_retrain_time))} seconds."
         )
-        
-        return {
-            "message": "Drift detected. Retraining triggered.",
-            "psi": psi,
-            "threshold": 0.2,
-            "drift_detected": True,
-            "action": "retrain_triggered",
-            "retrain_output": result.stdout[-800:] if result.stdout else "No output",
-            "retrain_error": result.stderr[-400:] if result.stderr else None
-        }
-    except Exception as e:
-        return {
-            "message": "Drift detected but retrain failed.",
-            "psi": psi,
-            "drift_detected": True,
-            "action": "retrain_failed",
-            "error": str(e)
-        }
+    
+    last_retrain_time = time.time()
+    
+    # Run retraining (raises exception on failure → 500 error, no silent failures)
+    result = run_retrain()
+    
+    # Reload model if promoted
+    if result["promoted"]:
+        model = joblib.load(MODEL_PATH)
+        explainer = shap.TreeExplainer(model)
+    
+    # ALWAYS reset drift reference after retraining (promoted or not)
+    # This prevents infinite retraining loops when PSI stays high
+    global training_data
+    X_combined = np.vstack([X_train, current_data[['sepal_length', 'sepal_width', 'petal_length', 'petal_width']].values])
+    training_data = pd.DataFrame(X_combined, columns=['sepal_length', 'sepal_width', 'petal_length', 'petal_width'])
+    current_data = training_data.copy()
+
+    return {
+        "action": "retrained",
+        "psi": psi,
+        "drift_detected": True,
+        **result
+    }

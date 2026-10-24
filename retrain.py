@@ -1,124 +1,121 @@
 """
-Auto-Retrain Script for Self-Healing ML Pipeline
-Runs when drift is detected (PSI > 0.2)
+Champion/Challenger model retraining with proper evaluation.
+
+Key fixes:
+- Same holdout set for both models (fair F1 comparison)
+- Actually updates model.pkl when challenger wins (real self-healing)
+- Fails loudly on errors (no silent failures)
+- Relative paths (works in Docker)
+- Requires margin to prevent noise-driven promotions
 """
 
-import mlflow
-import mlflow.sklearn
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.datasets import load_iris
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score
+import json
+import sys
+from pathlib import Path
+
+import joblib
 import numpy as np
 import pandas as pd
-import os
+from sklearn.datasets import load_iris
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import f1_score
+from sklearn.model_selection import train_test_split
 
 # ============================================
 # CONFIGURATION
 # ============================================
-CURRENT_RUN_ID = "b78e8495603d45c9aa17a5e274455f09"  # Your current champion model
-NEW_DATA_PATH = r"D:\P2\current_data.csv"  # Where we store new data
-DRIFT_THRESHOLD = 0.2
+ROOT = Path(__file__).parent
+MODEL_PATH = ROOT / "model.pkl"
+DATA_PATH = ROOT / "current_data.csv"
+FEATURES = ["sepal_length", "sepal_width", "petal_length", "petal_width"]
+MARGIN = 0.01  # challenger must beat champion by at least 1 point
 
-print("=" * 50)
-print("AUTO-RETRAIN SCRIPT")
-print("=" * 50)
 
-# ============================================
-# STEP 1: Load Original Training Data
-# ============================================
-print("\n[1/5] Loading original training data...")
-X_train, y_train = load_iris(return_X_y=True)
+def run_retrain():
+    """
+    Retrain a challenger model and compare against champion on same holdout.
+    
+    Returns dict with:
+        champion_f1: F1 of current production model on holdout
+        challenger_f1: F1 of newly trained model on holdout
+        holdout_size: number of samples in holdout
+        promoted: True if challenger was promoted to production
+    """
+    # ============================================
+    # VALIDATE INPUTS
+    # ============================================
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(f"No new data found at {DATA_PATH}")
 
-# ============================================
-# STEP 2: Load New Data (If Exists)
-# ============================================
-print("[2/5] Checking for new data...")
-if os.path.exists(NEW_DATA_PATH):
-    new_data = pd.read_csv(NEW_DATA_PATH)
-    print(f"   Found {len(new_data)} new samples")
-    
-    # Extract features and labels
-    X_new = new_data[['sepal_length', 'sepal_width', 'petal_length', 'petal_width']].values
-    y_new = new_data['target'].values
-    
-    # Combine old + new data
-    X_combined = np.vstack([X_train, X_new])
-    y_combined = np.concatenate([y_train, y_new])
-    print(f"   Combined data: {len(X_combined)} samples")
-else:
-    X_combined = X_train
-    y_combined = y_train
-    print("   No new data found. Using original data only.")
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(f"No champion model found at {MODEL_PATH}")
 
-# ============================================
-# STEP 3: Split Data
-# ============================================
-print("[3/5] Splitting data...")
-X_tr, X_te, y_tr, y_te = train_test_split(
-    X_combined, y_combined, test_size=0.2, random_state=42
-)
+    # ============================================
+    # LOAD CHAMPION MODEL
+    # ============================================
+    champion = joblib.load(MODEL_PATH)
 
-# ============================================
-# STEP 4: Train New Model
-# ============================================
-print("[4/5] Training new RandomForest model...")
+    # ============================================
+    # LOAD DATA
+    # ============================================
+    X_original, y_original = load_iris(return_X_y=True)
+    new_data = pd.read_csv(DATA_PATH)
 
-with mlflow.start_run(run_name="AutoRetrain_RandomForest"):
-    # Train
-    new_model = RandomForestClassifier(n_estimators=100, random_state=42)
-    new_model.fit(X_tr, y_tr)
-    
-    # Evaluate
-    y_pred = new_model.predict(X_te)
-    new_f1 = f1_score(y_te, y_pred, average='weighted')
-    
-    # Log parameters
-    mlflow.log_param("model_name", "RandomForest_AutoRetrain")
-    mlflow.log_param("n_estimators", 100)
-    mlflow.log_param("trigger", "drift_detected")
-    
-    # Log metrics
-    mlflow.log_metric("f1_score", new_f1)
-    
-    # Log model
-    mlflow.sklearn.log_model(new_model, "RandomForest_AutoRetrain_model")
-    
-    new_run_id = mlflow.active_run().info.run_id
-    
-    print(f"   New model F1: {new_f1:.4f}")
-    print(f"   New Run ID: {new_run_id}")
+    if new_data.empty:
+        raise ValueError(f"New data at {DATA_PATH} is empty")
 
-# ============================================
-# STEP 5: Compare with Current Champion
-# ============================================
-print("[5/5] Comparing with current champion...")
+    X_new = new_data[FEATURES].values
+    y_new = new_data["target"].values
 
-try:
-    client = mlflow.tracking.MlflowClient()
-    current_run = client.get_run(CURRENT_RUN_ID)
-    current_f1 = current_run.data.metrics.get("f1_score", 0)
-    
-    print(f"   Current champion F1: {current_f1:.4f}")
-    print(f"   New model F1:        {new_f1:.4f}")
-    
-    if new_f1 > current_f1:
-        print("\n   [OK] NEW MODEL IS BETTER!")
-        print("   [OK] PROMOTING NEW MODEL TO PRODUCTION")
-        print(f"   [OK] New production model: {new_run_id}")
-        
-        # Save promotion decision
-        with open("model_promotion.txt", "w") as f:
-            f.write(f"promoted_run_id={new_run_id}\n")
-            f.write(f"f1_score={new_f1}\n")
-            f.write(f"previous_f1={current_f1}\n")
-    else:
-        print("\n   [X] NEW MODEL IS WORSE")
-        print("   [X] KEEPING OLD MODEL IN PRODUCTION")
-except Exception as e:
-    print(f"   Error comparing: {e}")
-    print("   Keeping old model.")
+    # ============================================
+    # SPLIT NEW DATA INTO TRAIN/TEST FOR CHALLENGER
+    # This is the SAME holdout used to evaluate BOTH models
+    # ============================================
+    X_new_train, X_new_test, y_new_train, y_new_test = train_test_split(
+        X_new, y_new, test_size=0.4, random_state=42, stratify=y_new
+    )
 
-print("\n" + "=" * 50)
-print("AUTO-RETRAIN COMPLETE")
-print("=" * 50)
+    # ============================================
+    # TRAIN CHALLENGER ON COMBINED DATA
+    # ============================================
+    X_combined = np.vstack([X_original, X_new_train])
+    y_combined = np.concatenate([y_original, y_new_train])
+
+    challenger = RandomForestClassifier(n_estimators=100, random_state=42)
+    challenger.fit(X_combined, y_combined)
+
+    # ============================================
+    # EVALUATE BOTH ON SAME HOLDOUT
+    # ============================================
+    champion_predictions = champion.predict(X_new_test)
+    challenger_predictions = challenger.predict(X_new_test)
+
+    champion_f1 = f1_score(y_new_test, champion_predictions, average="weighted")
+    challenger_f1 = f1_score(y_new_test, challenger_predictions, average="weighted")
+
+    # ============================================
+    # PROMOTION DECISION
+    # ============================================
+    promoted = challenger_f1 >= champion_f1 + MARGIN
+
+    if promoted:
+        # Atomic swap: save to temp, then replace
+        temp_path = MODEL_PATH.with_suffix(".tmp")
+        joblib.dump(challenger, temp_path)
+        temp_path.replace(MODEL_PATH)
+
+    return {
+        "champion_f1": round(champion_f1, 4),
+        "challenger_f1": round(challenger_f1, 4),
+        "holdout_size": len(y_new_test),
+        "promoted": promoted,
+    }
+
+
+if __name__ == "__main__":
+    try:
+        result = run_retrain()
+        print(json.dumps(result, indent=2))
+    except Exception as e:
+        print(f"RETRAIN FAILED: {e}", file=sys.stderr)
+        sys.exit(1)
